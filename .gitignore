@@ -1,0 +1,30 @@
+# Binaries for programs and modules
+*.exe
+*.exe-
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+bin/
+dist/
+vivaldi-workspace-mcp
+
+# Test ratio and coverage
+*.cover
+*.mo
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE & Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment & Temp files
+.env
+*.tmp
+*.log
