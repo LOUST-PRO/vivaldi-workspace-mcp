@@ -12,11 +12,13 @@ import (
 	"strings"
 )
 
+// TabInfo represents extracted tab details.
 type TabInfo struct {
 	URL    string `json:"url"`
 	Domain string `json:"domain"`
 }
 
+// WorkspaceSnapshot represents a snapshot of tabs for a workspace.
 type WorkspaceSnapshot struct {
 	WorkspaceName string    `json:"workspace_name"`
 	TotalTabs     int       `json:"total_tabs"`
@@ -25,10 +27,11 @@ type WorkspaceSnapshot struct {
 
 var httpRegex = regexp.MustCompile(`https?://[^\s\x00-\x1f\x7f-\xff"]+`)
 
+// ExtractURLsFromSession extracts clean web URLs from binary SNSS/Tabs session files.
 func ExtractURLsFromSession(sessionFilePath string) ([]TabInfo, error) {
 	data, err := os.ReadFile(sessionFilePath)
 	if err != nil {
-		return nil, fmt.Errorf("error leyendo archivo de sesión %s: %w", sessionFilePath, err)
+		return nil, fmt.Errorf("failed to read session file %s: %w", sessionFilePath, err)
 	}
 
 	matches := httpRegex.FindAll(data, -1)
@@ -64,6 +67,7 @@ func ExtractURLsFromSession(sessionFilePath string) ([]TabInfo, error) {
 	return tabs, nil
 }
 
+// GetAllProfileTabs aggregates tabs across all binary session files in the profile.
 func GetAllProfileTabs(profilePath string) ([]TabInfo, error) {
 	if profilePath == "" {
 		profilePath = DefaultProfilePath()
@@ -72,7 +76,7 @@ func GetAllProfileTabs(profilePath string) ([]TabInfo, error) {
 	sessionsDir := filepath.Join(profilePath, "Sessions")
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
-		return nil, fmt.Errorf("error listando directorio Sessions: %w", err)
+		return nil, fmt.Errorf("failed to read Sessions directory: %w", err)
 	}
 
 	seen := make(map[string]bool)
@@ -97,12 +101,13 @@ func GetAllProfileTabs(profilePath string) ([]TabInfo, error) {
 	return allTabs, nil
 }
 
+// GenerateHTMLReport exports an interactive HTML report grouping recovered tabs by domain.
 func GenerateHTMLReport(tabs []TabInfo, outputPath string) error {
 	byDomain := make(map[string][]TabInfo)
 	for _, t := range tabs {
 		d := t.Domain
 		if d == "" {
-			d = "otros"
+			d = "other"
 		}
 		byDomain[d] = append(byDomain[d], t)
 	}
@@ -123,10 +128,10 @@ func GenerateHTMLReport(tabs []TabInfo, outputPath string) error {
 
 	var buf bytes.Buffer
 	buf.WriteString(fmt.Sprintf(`<!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Vivaldi MCP - Pestañas Recuperadas (%d pestañas)</title>
+    <title>Vivaldi MCP - Recovered Tabs (%d tabs)</title>
     <style>
         body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; }
         .container { max-width: 1000px; margin: 0 auto; }
@@ -145,11 +150,11 @@ func GenerateHTMLReport(tabs []TabInfo, outputPath string) error {
 <body>
     <div class="container">
         <header>
-            <h1>📂 Vivaldi MCP - Pestañas Recuperadas</h1>
-            <p>Total de pestañas rescatadas: <strong>%d</strong></p>
+            <h1>📂 Vivaldi MCP - Recovered Tabs</h1>
+            <p>Total tabs recovered: <strong>%d</strong></p>
         </header>
 
-        <input type="text" id="searchInput" class="search-box" placeholder="🔍 Buscar pestaña o dominio..." onkeyup="filterURLs()">
+        <input type="text" id="searchInput" class="search-box" placeholder="🔍 Search tab or domain..." onkeyup="filterURLs()">
         <div id="content">
 `, len(tabs), len(tabs)))
 
@@ -158,7 +163,7 @@ func GenerateHTMLReport(tabs []TabInfo, outputPath string) error {
         <div class="domain-card">
             <div class="domain-title">
                 <span>🌐 %s</span>
-                <span class="badge">%d pestañas</span>
+                <span class="badge">%d tabs</span>
             </div>
             <ul class="url-list">
 `, html.EscapeString(g.Domain), len(g.Tabs)))

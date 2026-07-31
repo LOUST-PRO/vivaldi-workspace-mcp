@@ -21,15 +21,15 @@ func main() {
 	// Tool: list_workspaces
 	listWorkspacesTool := mcp.NewTool(
 		"list_workspaces",
-		mcp.WithDescription("Lista los Espacios de Trabajo (Workspaces) configurados en el perfil de Vivaldi."),
+		mcp.WithDescription("Lists configured Vivaldi Workspaces from the current user profile."),
 	)
 	s.AddTool(listWorkspacesTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		profile, err := vivaldi.LoadProfile("")
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error cargando perfil: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to load Vivaldi profile: %v", err)), nil
 		}
 
-		res := fmt.Sprintf("Total de Espacios configurados: %d\n", len(profile.Workspaces))
+		res := fmt.Sprintf("Total Workspaces configured: %d\n", len(profile.Workspaces))
 		for i, ws := range profile.Workspaces {
 			res += fmt.Sprintf("%d. %s (ID: %s)\n", i+1, ws.Name, ws.ID)
 		}
@@ -40,15 +40,15 @@ func main() {
 	// Tool: list_workspace_tabs
 	listTabsTool := mcp.NewTool(
 		"list_workspace_tabs",
-		mcp.WithDescription("Extrae todas las pestañas y URLs rescatadas de las sesiones de Vivaldi."),
+		mcp.WithDescription("Extracts all open and recovered tabs/URLs from Vivaldi session files."),
 	)
 	s.AddTool(listTabsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		tabs, err := vivaldi.GetAllProfileTabs("")
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error extrayendo pestañas: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to extract tabs: %v", err)), nil
 		}
 
-		res := fmt.Sprintf("Total de Pestañas/URLs recuperadas: %d\n\n", len(tabs))
+		res := fmt.Sprintf("Total Tabs/URLs recovered: %d\n\n", len(tabs))
 		maxDisplay := 50
 		if len(tabs) < maxDisplay {
 			maxDisplay = len(tabs)
@@ -57,7 +57,7 @@ func main() {
 			res += fmt.Sprintf("- [%s] %s\n", tabs[i].Domain, tabs[i].URL)
 		}
 		if len(tabs) > maxDisplay {
-			res += fmt.Sprintf("\n... y %d pestañas más.", len(tabs)-maxDisplay)
+			res += fmt.Sprintf("\n... and %d more tabs.", len(tabs)-maxDisplay)
 		}
 
 		return mcp.NewToolResultText(res), nil
@@ -66,8 +66,8 @@ func main() {
 	// Tool: export_workspace_html
 	exportHTMLTool := mcp.NewTool(
 		"export_workspace_html",
-		mcp.WithDescription("Genera un reporte interactivo en HTML con todas las pestañas recuperadas organizadas por dominio."),
-		mcp.WithString("output_path", mcp.Description("Ruta del archivo HTML de salida"), mcp.Required()),
+		mcp.WithDescription("Generates an interactive searchable HTML report of all recovered tabs grouped by domain."),
+		mcp.WithString("output_path", mcp.Description("Output HTML file path"), mcp.Required()),
 	)
 	s.AddTool(exportHTMLTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		outPath := "/home/lou/Pestanas_Recuperadas_Vivaldi.html"
@@ -79,21 +79,21 @@ func main() {
 
 		tabs, err := vivaldi.GetAllProfileTabs("")
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error leyendo pestañas: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to read tabs: %v", err)), nil
 		}
 
 		if err := vivaldi.GenerateHTMLReport(tabs, outPath); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error generando reporte HTML: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to generate HTML report: %v", err)), nil
 		}
 
-		return mcp.NewToolResultText(fmt.Sprintf("Reporte HTML generado exitosamente en: %s con %d pestañas.", outPath, len(tabs))), nil
+		return mcp.NewToolResultText(fmt.Sprintf("HTML report successfully generated at: %s (%d tabs).", outPath, len(tabs))), nil
 	})
 
 	// Tool: launch_tabs
 	launchTabsTool := mcp.NewTool(
 		"launch_tabs",
-		mcp.WithDescription("Abre una o varias URLs directamente en Vivaldi."),
-		mcp.WithString("urls", mcp.Description("Lista de URLs separadas por coma"), mcp.Required()),
+		mcp.WithDescription("Launches one or more URLs directly in Vivaldi."),
+		mcp.WithString("urls", mcp.Description("Comma-separated list of URLs to open"), mcp.Required()),
 	)
 	s.AddTool(launchTabsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		urlsStr := ""
@@ -104,19 +104,19 @@ func main() {
 		}
 
 		if urlsStr == "" {
-			return mcp.NewToolResultError("Se requiere al menos una URL"), nil
+			return mcp.NewToolResultError("At least one URL is required"), nil
 		}
 
 		urls := []string{urlsStr}
 		if err := vivaldi.LaunchURLsInVivaldi(urls); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error abriendo Vivaldi: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to launch Vivaldi: %v", err)), nil
 		}
 
-		return mcp.NewToolResultText("Iniciado Vivaldi con las URLs proporcionadas."), nil
+		return mcp.NewToolResultText("Vivaldi launched with provided URLs."), nil
 	})
 
 	if err := server.ServeStdio(s); err != nil {
-		log.Fatalf("Error ejecutando MCP server: %v\n", err)
+		log.Fatalf("MCP server error: %v\n", err)
 		os.Exit(1)
 	}
 }

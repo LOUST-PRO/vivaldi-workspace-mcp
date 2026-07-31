@@ -1,34 +1,52 @@
 # 🚀 vivaldi-workspace-mcp
 
-Un servidor MCP (Model Context Protocol) escrito en **Go** para inspeccionar, exportar, organizar y gestionar los **Espacios de Trabajo (Workspaces)** y pestañas de Vivaldi Browser en Linux.
+[![Go Version](https://img.shields.io/badge/go-1.26+-00ADD8.svg?style=flat&logo=go)](https://golang.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+An Model Context Protocol (**MCP**) server written in **Go** designed to inspect, extract, organize, and manage **Vivaldi Workspaces** and tab sessions on Linux.
+
+*Read this document in [Español](README.es.md).*
 
 ---
 
-## 📌 Características
+## 📌 Features
 
-- 📂 **Inspección de Espacios (Workspaces)**: Detecta automáticamente todos los espacios (`Developer`, `Investigacion`, `UI`, `WorkHunting`, `Ocio`, `Grupos`) configurados en tu perfil de Vivaldi.
-- 🔖 **Extracción y Rescate de Sesiones**: Lee de los archivos de sesión binarios de Chromium/Vivaldi (`Tabs_*`) e identifica todas las URLs abiertas e históricas.
-- 📊 **Exportación HTML Interactiva**: Genera páginas de rescate organizadas por dominios y con filtro de búsqueda en tiempo real.
-- 🚀 **Lanzador de Pestañas**: Abre grupos de pestañas o enlaces directamente en la instancia activa de Vivaldi.
-
----
-
-## 🛠️ Herramientas MCP (Tools)
-
-1. `list_workspaces`: Retorna los espacios de trabajo registrados en Vivaldi.
-2. `list_workspace_tabs`: Lista las URLs y dominios extraídos de la sesión de Vivaldi.
-3. `export_workspace_html`: Genera un reporte HTML filtrable con todas las pestañas recuperadas.
-4. `launch_tabs`: Inicia Vivaldi con las URLs pasadas por parámetro.
+- 📂 **Workspace Discovery**: Automatically parses Vivaldi profile preferences (`Preferences`) to detect configured Workspaces.
+- 🔖 **Session & Tab Extraction**: Reads binary Chromium/Vivaldi session files (`Tabs_*`) to extract open, stored, and recovered URLs.
+- 📊 **Interactive HTML Report**: Exports searchable, domain-grouped HTML reports for quick session recovery.
+- 🚀 **Tab & Workspace Launcher**: Programmatically launches URLs and tab groups directly in Vivaldi via CLI.
 
 ---
 
-## 🚀 Compilación y Ejecución
+## 🛠️ Available MCP Tools
+
+| Tool | Description |
+| :--- | :--- |
+| `list_workspaces` | Lists all configured Vivaldi Workspaces with their unique IDs. |
+| `list_workspace_tabs` | Extracts and returns open/recovered tabs and URLs from session state files. |
+| `export_workspace_html` | Generates a searchable HTML report grouping recovered tabs by domain. |
+| `launch_tabs` | Launches Vivaldi with a specified list of URLs. |
+
+---
+
+## 💻 Installation & Usage
+
+### 1. Build the Binary
 
 ```bash
-# Compilar el binario
-go build -o bin/vivaldi-workspace-mcp .
+# Clone the repository
+git clone https://github.com/LOUST-PRO/vivaldi-workspace-mcp.git
+cd vivaldi-workspace-mcp
 
-# Configuración en tu cliente MCP (ej. ~/.gemini/mcp_config.json o Claude Code / Antigravity)
+# Build executable
+go build -o bin/vivaldi-workspace-mcp .
+```
+
+### 2. Configure in your MCP Client (e.g. Antigravity CLI / Claude Code)
+
+Add the server definition to your `mcp_servers` configuration:
+
+```json
 {
   "mcpServers": {
     "vivaldi-workspace": {
@@ -40,6 +58,6 @@ go build -o bin/vivaldi-workspace-mcp .
 
 ---
 
-## 📜 Licencia
+## 📄 License
 
-MIT © [louzt / LOUST-PRO](https://github.com/LOUST-PRO)
+Distributed under the MIT License. See `LICENSE` for details.

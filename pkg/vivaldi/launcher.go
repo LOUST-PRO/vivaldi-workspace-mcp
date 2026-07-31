@@ -5,15 +5,16 @@ import (
 	"os/exec"
 )
 
+// LaunchURLsInVivaldi opens one or more URLs in Vivaldi using CLI execution.
 func LaunchURLsInVivaldi(urls []string) error {
 	if len(urls) == 0 {
-		return fmt.Errorf("no se proporcionaron URLs para abrir")
+		return fmt.Errorf("no URLs provided to launch")
 	}
 
 	args := append([]string{}, urls...)
 	cmd := exec.Command("vivaldi", args...)
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("error iniciando Vivaldi: %w", err)
+		return fmt.Errorf("failed to start Vivaldi process: %w", err)
 	}
 
 	return nil
