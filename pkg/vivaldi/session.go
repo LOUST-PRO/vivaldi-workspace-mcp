@@ -10,25 +10,25 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
+
+	"github.com/louzt/vivaldi-workspace-mcp/pkg/vivaldi/filex"
 )
 
-// TabInfo represents extracted tab details.
-type TabInfo struct {
-	URL    string `json:"url"`
-	Domain string `json:"domain"`
-}
+// TabSummary is defined in types.go. It is reused here for the
+// per-domain HTML grouping and for the Tabs[] field on WorkspaceSnapshot.
 
 // WorkspaceSnapshot represents a snapshot of tabs for a workspace.
 type WorkspaceSnapshot struct {
-	WorkspaceName string    `json:"workspace_name"`
-	TotalTabs     int       `json:"total_tabs"`
-	Tabs          []TabInfo `json:"tabs"`
+	WorkspaceName string       `json:"workspace_name"`
+	TotalTabs     int          `json:"total_tabs"`
+	Tabs          []TabSummary `json:"tabs"`
 }
 
 var httpRegex = regexp.MustCompile(`https?://[^\s\x00-\x1f\x7f-\xff"]+`)
 
 // ExtractURLsFromSession extracts clean web URLs from binary SNSS/Tabs session files.
-func ExtractURLsFromSession(sessionFilePath string) ([]TabInfo, error) {
+func ExtractURLsFromSession(sessionFilePath string) ([]TabSummary, error) {
 	data, err := os.ReadFile(sessionFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read session file %s: %w", sessionFilePath, err)
@@ -36,7 +36,7 @@ func ExtractURLsFromSession(sessionFilePath string) ([]TabInfo, error) {
 
 	matches := httpRegex.FindAll(data, -1)
 	seen := make(map[string]bool)
-	var tabs []TabInfo
+	var tabs []TabSummary
 
 	for _, match := range matches {
 		rawURL := string(match)
@@ -57,7 +57,7 @@ func ExtractURLsFromSession(sessionFilePath string) ([]TabInfo, error) {
 			if err == nil {
 				domain = strings.TrimPrefix(parsed.Host, "www.")
 			}
-			tabs = append(tabs, TabInfo{
+			tabs = append(tabs, TabSummary{
 				URL:    cleanURL,
 				Domain: domain,
 			})
@@ -67,8 +67,10 @@ func ExtractURLsFromSession(sessionFilePath string) ([]TabInfo, error) {
 	return tabs, nil
 }
 
-// GetAllProfileTabs aggregates tabs across all binary session files in the profile.
-func GetAllProfileTabs(profilePath string) ([]TabInfo, error) {
+// GetAllProfileTabs aggregates tabs across all binary session files in
+// the profile. Returns the rich TabsSummary type with the source file
+// basenames so the MCP handler can include "where did these come from".
+func GetAllProfileTabs(profilePath string) (TabsSummary, error) {
 	if profilePath == "" {
 		profilePath = DefaultProfilePath()
 	}
@@ -76,34 +78,51 @@ func GetAllProfileTabs(profilePath string) ([]TabInfo, error) {
 	sessionsDir := filepath.Join(profilePath, "Sessions")
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read Sessions directory: %w", err)
+		return TabsSummary{}, fmt.Errorf("failed to read Sessions directory: %w", err)
 	}
 
 	seen := make(map[string]bool)
-	var allTabs []TabInfo
+	var allTabs []TabSummary
+	var sources []string
 
 	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasPrefix(entry.Name(), "Tabs_") {
-			fullPath := filepath.Join(sessionsDir, entry.Name())
-			tabs, err := ExtractURLsFromSession(fullPath)
-			if err != nil {
-				continue
-			}
-			for _, t := range tabs {
-				if !seen[t.URL] {
-					seen[t.URL] = true
-					allTabs = append(allTabs, t)
-				}
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "Tabs_") {
+			continue
+		}
+		fullPath := filepath.Join(sessionsDir, entry.Name())
+		tabs, err := ExtractURLsFromSession(fullPath)
+		if err != nil {
+			// Continue on per-file errors so a single corrupt session
+			// does not nuke the entire report.
+			continue
+		}
+		sources = append(sources, entry.Name())
+		for _, t := range tabs {
+			if !seen[t.URL] {
+				seen[t.URL] = true
+				allTabs = append(allTabs, t)
 			}
 		}
 	}
 
-	return allTabs, nil
+	return TabsSummary{
+		ProfilePath: profilePath,
+		SessionsDir: sessionsDir,
+		Sources:     sources,
+		Count:       len(allTabs),
+		Tabs:        allTabs,
+	}, nil
 }
 
 // GenerateHTMLReport exports an interactive HTML report grouping recovered tabs by domain.
-func GenerateHTMLReport(tabs []TabInfo, outputPath string) error {
-	byDomain := make(map[string][]TabInfo)
+//
+// Atomic write via filex.WriteFileAtomic: writes to <outputPath>.tmp first
+// then renames. If the process crashes mid-write, the previous report is
+// preserved.
+func GenerateHTMLReport(tabs []TabSummary, outputPath string) (HTMLExportResult, error) {
+	start := time.Now()
+
+	byDomain := make(map[string][]TabSummary)
 	for _, t := range tabs {
 		d := t.Domain
 		if d == "" {
@@ -114,7 +133,7 @@ func GenerateHTMLReport(tabs []TabInfo, outputPath string) error {
 
 	type domainGroup struct {
 		Domain string
-		Tabs   []TabInfo
+		Tabs   []TabSummary
 	}
 
 	var groups []domainGroup
@@ -206,5 +225,16 @@ func GenerateHTMLReport(tabs []TabInfo, outputPath string) error {
 </html>
 `)
 
-	return os.WriteFile(outputPath, buf.Bytes(), 0644)
+	written, err := filex.WriteFileAtomic(outputPath, buf.Bytes(), 0644)
+	if err != nil {
+		return HTMLExportResult{}, err
+	}
+
+	return HTMLExportResult{
+		OutputPath: outputPath,
+		Count:      len(tabs),
+		Bytes:      int64(written),
+		Atomic:     true,
+		DurationMS: time.Since(start).Milliseconds(),
+	}, nil
 }
