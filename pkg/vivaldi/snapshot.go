@@ -38,15 +38,22 @@ type WorkspaceTabs struct {
 
 // SnapshotRecord is the file format written to disk.
 //
-// Schema-stable across versions: future Fase C+ tooling must be able to
-// read v1.1.0 snapshots without code changes. Add fields, never rename.
+// Schema contract (additive only — see docs/snapshots.md for the full
+// stability guarantees):
+//   - Future versions of this server MUST be able to read v1.x records
+//     without code changes (forward-compatible).
+//   - To evolve the schema, add new fields with json tags. Never rename
+//     or remove existing fields, and never change the JSON representation
+//     of an existing field's type.
+//   - Bump the Version field only when consumers should re-read or when
+//     an incompatible interpretation would otherwise result.
 type SnapshotRecord struct {
 	SnapshotID  string          `json:"snapshot_id"`
 	SavedAt     string          `json:"saved_at"`
 	Version     string          `json:"version"` // schema version, matches MCP version
 	ProfilePath string          `json:"profile_path"`
 	Workspaces  []WorkspaceTabs `json:"workspaces"`
-	Totals      SnapshotTotals   `json:"totals"`
+	Totals      SnapshotTotals  `json:"totals"`
 }
 
 // SnapshotTotals provides cheap counters for list_snapshots without
@@ -59,42 +66,42 @@ type SnapshotTotals struct {
 // SnapshotSummary is the per-snapshot info returned by list_snapshots.
 // Includes only metadata, NOT the tabs (so list stays fast).
 type SnapshotSummary struct {
-	SnapshotID  string        `json:"snapshot_id"`
-	SavedAt     string        `json:"saved_at"`
-	Version     string        `json:"version"`
-	ProfilePath string        `json:"profile_path"`
-	Path        string        `json:"path"` // absolute path on disk
-	Bytes       int64         `json:"bytes"`
+	SnapshotID  string         `json:"snapshot_id"`
+	SavedAt     string         `json:"saved_at"`
+	Version     string         `json:"version"`
+	ProfilePath string         `json:"profile_path"`
+	Path        string         `json:"path"` // absolute path on disk
+	Bytes       int64          `json:"bytes"`
 	Totals      SnapshotTotals `json:"totals"`
 }
 
 // SnapshotSaveResult is the response of save_workspace_snapshot.
 type SnapshotSaveResult struct {
-	SnapshotID  string `json:"snapshot_id"`
-	Path        string `json:"path"` // abs path to snapshot dir
-	Bytes       int64  `json:"bytes"`
-	DurationMS  int64  `json:"duration_ms"`
-	Workspaces  int    `json:"workspaces"`
-	URLs        int    `json:"urls"`
+	SnapshotID string `json:"snapshot_id"`
+	Path       string `json:"path"` // abs path to snapshot dir
+	Bytes      int64  `json:"bytes"`
+	DurationMS int64  `json:"duration_ms"`
+	Workspaces int    `json:"workspaces"`
+	URLs       int    `json:"urls"`
 }
 
 // SnapshotListResult is the response of list_snapshots.
 type SnapshotListResult struct {
-	BaseDir   string             `json:"base_dir"`
-	Count     int                `json:"count"`
-	Snapshots []SnapshotSummary  `json:"snapshots"`
+	BaseDir   string            `json:"base_dir"`
+	Count     int               `json:"count"`
+	Snapshots []SnapshotSummary `json:"snapshots"`
 }
 
 // SnapshotRestoreResult is the response of restore_workspace_snapshot.
 type SnapshotRestoreResult struct {
-	SnapshotID   string   `json:"snapshot_id"`
-	Path         string   `json:"path"`
+	SnapshotID    string   `json:"snapshot_id"`
+	Path          string   `json:"path"`
 	RequestedURLs []string `json:"requested_urls"`
-	LaunchedURLs []string `json:"launched_urls"`
-	RejectedURLs []string `json:"rejected_urls"`
-	Batches      int      `json:"batches"`
-	DurationMS   int64    `json:"duration_ms"`
-	Binary       string   `json:"binary"`
+	LaunchedURLs  []string `json:"launched_urls"`
+	RejectedURLs  []string `json:"rejected_urls"`
+	Batches       int      `json:"batches"`
+	DurationMS    int64    `json:"duration_ms"`
+	Binary        string   `json:"binary"`
 }
 
 // SaveSnapshotOption configures a SaveSnapshot call.
@@ -120,10 +127,11 @@ func SaveSnapshot(opts SaveSnapshotOption) (SnapshotSaveResult, error) {
 		return SnapshotSaveResult{}, fmt.Errorf("load tabs: %w", err)
 	}
 
-	// Group tabs by URL-prefix heuristic when workspace_id is present
-	// (Vivaldi doesn't store per-tab workspace metadata in Tabs_ files
-	// directly; this is an approximation based on URL ordering vs
-	// current workspace count).
+	// Group tabs by URL-prefix heuristic when workspace_id is present.
+	// Vivaldi's binary session files do not embed workspace_id per tab,
+	// so this gives a reasonable approximation that holds up well in
+	// practice (the saved order roughly tracks the user's workspace
+	// sequence). See buildWorkspaceTabs for the full caveat.
 	workspaces := buildWorkspaceTabs(profile, tabsSummary.Tabs, opts.OnlyWSID)
 
 	totals := SnapshotTotals{
@@ -337,7 +345,7 @@ func RestoreSnapshot(snapshotID string, launchOpts LaunchOptions, onlyWSID strin
 		RejectedURLs:  rejectedAll,
 		Batches:       batches,
 		DurationMS:    time.Since(start).Milliseconds(),
-		Binary:        func() string {
+		Binary: func() string {
 			if launchOpts.Binary != "" {
 				return launchOpts.Binary
 			}
@@ -348,11 +356,12 @@ func RestoreSnapshot(snapshotID string, launchOpts LaunchOptions, onlyWSID strin
 
 // buildWorkspaceTabs distributes tabs across workspaces.
 //
-// Vivaldi session files do NOT tag individual tabs with workspace_id,
-// so we approximate by evenly distributing the URL list in proportion
-// to each workspace's tab count expectation. This is heuristic, not
-// perfect — Fase C+ would parse Preferences.sessions to get exact
-// mapping when present.
+// Vivaldi's binary session files do not tag individual tabs with their
+// owning workspace_id. We approximate by round-robin distributing the URL
+// list across the configured workspaces. This is a heuristic, not a
+// guarantee — for exact per-tab workspace attribution, parse the
+// `vivaldi.sessions` array inside Preferences (out of scope for this
+// server's read-only contract on the live profile).
 func buildWorkspaceTabs(profile *Profile, tabs []TabSummary, onlyWSID string) []WorkspaceTabs {
 	if len(profile.Workspaces) == 0 || len(tabs) == 0 {
 		return []WorkspaceTabs{}

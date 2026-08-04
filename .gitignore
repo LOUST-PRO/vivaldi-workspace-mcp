@@ -28,3 +28,6 @@ go.work.sum
 .env
 *.tmp
 *.log
+
+# Internal working documents (planning notes in Spanish; not for public review)
+plan.md

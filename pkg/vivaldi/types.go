@@ -1,10 +1,11 @@
-// Package vivaldi provides response types and helpers for the MCP server.
+// Package vivaldi contains the Vivaldi-specific readers, writers, and
+// response types shared with the MCP server in main.go.
 //
-// Output structs in this file are designed for structured JSON
-// serialization per the lzt-zero-noise-mcp rule:
-//   - Stable field names (no abbreviations)
-//   - Omit empty slices (not nil)
-//   - Time and count fields always present, even if zero
+// Response structs are designed for structured JSON serialization:
+//   - Stable, snake_case field names (no abbreviations, no stutter).
+//   - omitempty on optional fields (icon, truncated, hint).
+//   - Count, duration, and size fields are always present, even if zero,
+//     so consumers can rely on them being there.
 package vivaldi
 
 // WorkspaceSummary describes a single Vivaldi workspace entry.
@@ -57,12 +58,12 @@ type HTMLExportResult struct {
 // Vivaldi is started ONCE per call with all valid URLs as positional args.
 // Invalid URLs are reported back, not silently dropped.
 type LaunchResult struct {
-	Binary       string   `json:"binary"`
-	PID          int      `json:"pid"`
+	Binary        string   `json:"binary"`
+	PID           int      `json:"pid"`
 	RequestedURLs []string `json:"requested_urls"`
-	LaunchedURLs []string `json:"launched_urls"`
-	RejectedURLs []string `json:"rejected_urls"`
-	DurationMS   int64    `json:"duration_ms"`
+	LaunchedURLs  []string `json:"launched_urls"`
+	RejectedURLs  []string `json:"rejected_urls"`
+	DurationMS    int64    `json:"duration_ms"`
 }
 
 // ToolError is the canonical error envelope. Returned via
@@ -78,14 +79,14 @@ type ToolError struct {
 
 // Rejection describes a single URL rejected by the launcher.
 type Rejection struct {
-	URL   string `json:"url"`
-	Code  string `json:"code"`
-	Why   string `json:"why"`
+	URL  string `json:"url"`
+	Code string `json:"code"`
+	Why  string `json:"why"`
 }
 
 // LaunchValidation is the input-side validation report returned
 // before any process is started. Used by main.go for context-with-code.
 type LaunchValidation struct {
-	Accepted   []string    `json:"accepted"`
-	Rejected   []Rejection `json:"rejected"`
+	Accepted []string    `json:"accepted"`
+	Rejected []Rejection `json:"rejected"`
 }
