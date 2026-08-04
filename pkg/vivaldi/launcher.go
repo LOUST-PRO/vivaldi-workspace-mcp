@@ -24,15 +24,46 @@ type LaunchOptions struct {
 
 // LaunchURLs validates the URLs, starts Vivaldi with them as positional
 // args, and waits (with timeout) for the process to either exit cleanly
-// or be in a "running and stable" state.
+// or to remain running (which is the normal case for the running
+// browser instance).
 //
-// Vivaldi's CLI semantics (verified 2026-07):
-//   - `vivaldi <url1> <url2> ...` reuses the running instance and adds
-//     each URL as a new tab. We do NOT pass --new-window by default because
-//     the user almost always wants tabs in the active window.
+// Vivaldi CLI semantics (verified against Vivaldi 7.x on Linux, 2026-07):
+//
+//	$ vivaldi <url1> <url2> ...
+//
+// The above reuses the running Vivaldi instance if one is already
+// listening on the user's session bus (single-instance lock at
+// ~/.config/vivaldi/SingletonLock), and queues each URL as a new tab in
+// the active window. If no instance is running, a new one is started
+// with all URLs opened at once.
+//
+// We deliberately do NOT pass --new-window by default because most
+// callers want tabs in the currently-active window, not a fresh one. If
+// you need a new window per call, prepend it to opts.Args:
+//
+//	opts.Args = []string{"--new-window"}
+//
+// Vivaldi's CLI is a Chromium-style wrapper, so common Chromium flags
+// pass through:
+//
+//	--profile-directory=NAME    use a non-"Default" profile
+//	--user-data-dir=PATH        override ~/.config/vivaldi entirely
+//	--disk-cache-dir=PATH       move cache off the default location
+//	--no-first-run              skip the first-run welcome flow
+//	--no-default-browser-check  skip the "make default?" prompt
+//	--enable-logging=stderr     forward Chromium logs to stderr
+//	--new-window                open URLs in a fresh window
+//
+// Useful environment variables:
+//
+//	DISPLAY                    must be set or the X server reachable
+//	                           via xauth; without it, Vivaldi fails with
+//	                           "Failed to connect to the bus".
+//	XDG_RUNTIME_DIR            required for D-Bus / SingleInstanceLock.
 //
 // Returns a LaunchResult with separate Accepted / Rejected lists so
-// callers can surface partial failures.
+// callers can surface partial failures without losing visibility on
+// what did get queued.
 func LaunchURLs(urls []string, opts LaunchOptions) (LaunchResult, error) {
 	start := time.Now()
 
@@ -118,11 +149,25 @@ func LaunchURLs(urls []string, opts LaunchOptions) (LaunchResult, error) {
 	}, nil
 }
 
-// splitValidURLs returns (accepted, rejectedURLs) where accepted contains
-// only URLs starting with http:// or https:// and longer than a trivial
-// prefix. Empty tokens are summarized as a single "(empty)" entry so
-// stray commas are reported but empty whitespace tokens are not counted
-// multiple times.
+// splitValidURLs classifies a list of strings into URLs that Vivaldi
+// will accept (http:// or https://, with a sane minimum length) and
+// those it will reject.
+//
+// Why we filter:
+//   - Vivaldi treats positional args that don't look like standard web
+//     URLs (file://, javascript:, custom schemes) as either navigation
+//     attempts or as flags, both of which can have surprising or unsafe
+//     side effects. Restricting to http(s) keeps the launcher
+//     predictable and prevents the most common prompt-injection footguns
+//     (a model that emits "file:///etc/passwd" by mistake cannot
+//     exfiltrate via this path).
+//   - "http://x" alone (length 8) is too short to be a meaningful URL
+//     and is almost always a typo or a stray fragment from a pasted
+//     URL list.
+//
+// Empty tokens are summarized as a single "(empty x N)" entry so stray
+// commas are reported but empty whitespace tokens are not counted
+// multiple times in the rejected list.
 func splitValidURLs(urls []string) (accepted []string, rejected []string) {
 	emptyCount := 0
 	for _, u := range urls {

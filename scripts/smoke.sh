@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
-# Smoke test for vivaldi-workspace-mcp Fase A + Fase C hardening.
+# Smoke test for vivaldi-workspace-mcp.
 #
-# Sends 8 JSON-RPC requests over stdio and verifies responses.
-# Run from repo root: scripts/smoke.sh
+# Sends a sequence of JSON-RPC requests over stdio and verifies that each
+# tool returns the expected structured JSON envelope. The script also
+# checks ToolAnnotations (readOnlyHint, openWorldHint, idempotentHint)
+# on every advertised tool so we catch missing or mis-set annotations
+# before shipping.
+#
+# Run from the repo root:
+#     scripts/smoke.sh
 
 set -euo pipefail
 
