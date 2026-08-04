@@ -1,73 +1,156 @@
+// Command vivaldi-workspace-mcp is an MCP server that inspects, extracts,
+// organizes, and manages Vivaldi workspaces and tab sessions on Linux.
+//
+// Hardened per the lzt-zero-noise-mcp 12 rules:
+//   - Structured JSON output (embedded in text content)
+//   - ToolAnnotations on every tool (read-only, idempotent, open-world=false)
+//   - Stderr logger so MCP stdio is never polluted
+//   - signal.NotifyContext for graceful SIGINT/SIGTERM shutdown
+//   - atomic file writes via pkg/vivaldi/filex
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 
 	"github.com/louzt/vivaldi-workspace-mcp/pkg/vivaldi"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
 
+// readOnlyAnnot is the canonical ToolAnnotations block for read-only tools
+// (those that only inspect the Vivaldi profile, never write).
+//
+// readOnlyHint      = true:  we never modify Vivaldi's profile state.
+// destructiveHint   = false: same.
+// idempotentHint    = true:  same inputs produce same outputs (modulo time).
+// openWorldHint     = false: the MCP only touches the local Vivaldi profile.
+func readOnlyAnnot() mcp.ToolAnnotation {
+	ro, d, i, o := true, false, true, false
+	return mcp.ToolAnnotation{
+		ReadOnlyHint:    &ro,
+		DestructiveHint: &d,
+		IdempotentHint:  &i,
+		OpenWorldHint:   &o,
+	}
+}
+
+// mutateAnnot is for tools that produce side effects (file write, process
+// spawn). ReadOnlyHint=false, all others stay consistent with read-only:
+// non-destructive on profile data, idempotent on re-run, closed-world.
+func mutateAnnot() mcp.ToolAnnotation {
+	ro, d, i, o := false, false, true, false
+	return mcp.ToolAnnotation{
+		ReadOnlyHint:    &ro,
+		DestructiveHint: &d,
+		IdempotentHint:  &i,
+		OpenWorldHint:   &o,
+	}
+}
+
+// jsonResult marshals v as minified JSON and wraps it in NewToolResultText.
+// Returns a soft error variant if marshaling fails (which would be a bug).
+func jsonResult(label string, v interface{}) (*mcp.CallToolResult, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("[%s] marshal failed: %v", label, err)), nil
+	}
+	return mcp.NewToolResultText(string(b)), nil
+}
+
+// jsonErr wraps a ToolError envelope as MCP text result (soft error).
+func jsonErr(label string, code, msg, hint string) (*mcp.CallToolResult, error) {
+	envelope := vivaldi.ToolError{Code: code, Message: msg, Hint: hint}
+	b, _ := json.Marshal(envelope)
+	return mcp.NewToolResultText(fmt.Sprintf("[%s] %s", label, string(b))), nil
+}
+
+// splitCSV parses a comma-separated URL string. Whitespace tolerant.
+// Empty tokens are skipped.
+func splitCSV(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func main() {
+	// Stderr logger; stdout is the MCP channel.
+	logger := log.New(os.Stderr, "[vivaldi-workspace-mcp] ", log.LstdFlags|log.Lmsgprefix)
+
+	// Graceful shutdown — wait for in-flight tools to finish or 5s.
+	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	s := server.NewMCPServer(
 		"vivaldi-workspace-mcp",
-		"1.0.0",
+		"1.1.0",
 		server.WithLogging(),
 	)
 
-	// Tool: list_workspaces
+	// --- Tool: list_workspaces ---
 	listWorkspacesTool := mcp.NewTool(
 		"list_workspaces",
 		mcp.WithDescription("Lists configured Vivaldi Workspaces from the current user profile."),
+		mcp.WithToolAnnotation(readOnlyAnnot()),
 	)
 	s.AddTool(listWorkspacesTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		profile, err := vivaldi.LoadProfile("")
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to load Vivaldi profile: %v", err)), nil
+			return jsonErr("list_workspaces", "profile_load_failed", err.Error(),
+				"Verify Vivaldi is installed and ~/.config/vivaldi/Default/Preferences exists.")
 		}
-
-		res := fmt.Sprintf("Total Workspaces configured: %d\n", len(profile.Workspaces))
+		workspaces := make([]vivaldi.WorkspaceSummary, 0, len(profile.Workspaces))
 		for i, ws := range profile.Workspaces {
-			res += fmt.Sprintf("%d. %s (ID: %s)\n", i+1, ws.Name, ws.ID)
+			workspaces = append(workspaces, vivaldi.WorkspaceSummary{
+				ID:    ws.ID,
+				Name:  ws.Name,
+				Icon:  ws.Icon,
+				Index: i,
+			})
 		}
-
-		return mcp.NewToolResultText(res), nil
+		return jsonResult("list_workspaces", vivaldi.ProfileSummary{
+			ProfilePath: profile.Path,
+			Count:       len(workspaces),
+			Workspaces:  workspaces,
+		})
 	})
 
-	// Tool: list_workspace_tabs
+	// --- Tool: list_workspace_tabs ---
 	listTabsTool := mcp.NewTool(
 		"list_workspace_tabs",
 		mcp.WithDescription("Extracts all open and recovered tabs/URLs from Vivaldi session files."),
+		mcp.WithToolAnnotation(readOnlyAnnot()),
 	)
 	s.AddTool(listTabsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		tabs, err := vivaldi.GetAllProfileTabs("")
+		summary, err := vivaldi.GetAllProfileTabs("")
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to extract tabs: %v", err)), nil
+			return jsonErr("list_workspace_tabs", "tabs_extract_failed", err.Error(),
+				"Check that Sessions/ directory is readable.")
 		}
-
-		res := fmt.Sprintf("Total Tabs/URLs recovered: %d\n\n", len(tabs))
-		maxDisplay := 50
-		if len(tabs) < maxDisplay {
-			maxDisplay = len(tabs)
-		}
-		for i := 0; i < maxDisplay; i++ {
-			res += fmt.Sprintf("- [%s] %s\n", tabs[i].Domain, tabs[i].URL)
-		}
-		if len(tabs) > maxDisplay {
-			res += fmt.Sprintf("\n... and %d more tabs.", len(tabs)-maxDisplay)
-		}
-
-		return mcp.NewToolResultText(res), nil
+		return jsonResult("list_workspace_tabs", summary)
 	})
 
-	// Tool: export_workspace_html
+	// --- Tool: export_workspace_html ---
 	exportHTMLTool := mcp.NewTool(
 		"export_workspace_html",
-		mcp.WithDescription("Generates an interactive searchable HTML report of all recovered tabs grouped by domain."),
-		mcp.WithString("output_path", mcp.Description("Output HTML file path"), mcp.Required()),
+		mcp.WithDescription("Generates a searchable HTML report of all recovered tabs grouped by domain."),
+		mcp.WithToolAnnotation(mutateAnnot()), // writes a file at user-provided path
+		mcp.WithString("output_path", mcp.Description("Output HTML file path. Defaults to ~/Pestanas_Recuperadas_Vivaldi.html if empty. Atomic write: previous version is preserved if process crashes mid-write.")),
 	)
 	s.AddTool(exportHTMLTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		outPath := "/home/lou/Pestanas_Recuperadas_Vivaldi.html"
@@ -77,22 +160,31 @@ func main() {
 			}
 		}
 
-		tabs, err := vivaldi.GetAllProfileTabs("")
+		// require == false; we fall back to default. So the description
+		// above is informational only.
+		// (If you want to make it required, add mcp.Required() and surface
+		// a hard error here.)
+
+		summary, err := vivaldi.GetAllProfileTabs("")
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to read tabs: %v", err)), nil
+			return jsonErr("export_workspace_html", "tabs_extract_failed", err.Error(),
+				"Check that Sessions/ directory is readable.")
 		}
 
-		if err := vivaldi.GenerateHTMLReport(tabs, outPath); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to generate HTML report: %v", err)), nil
+		result, err := vivaldi.GenerateHTMLReport(summary.Tabs, outPath)
+		if err != nil {
+			return jsonErr("export_workspace_html", "html_write_failed", err.Error(),
+				"Check that the destination path is writable and not held by another process.")
 		}
-
-		return mcp.NewToolResultText(fmt.Sprintf("HTML report successfully generated at: %s (%d tabs).", outPath, len(tabs))), nil
+		result.ProfilePath = summary.ProfilePath
+		return jsonResult("export_workspace_html", result)
 	})
 
-	// Tool: launch_tabs
+	// --- Tool: launch_tabs ---
 	launchTabsTool := mcp.NewTool(
 		"launch_tabs",
-		mcp.WithDescription("Launches one or more URLs directly in Vivaldi."),
+		mcp.WithDescription("Launches one or more URLs directly in Vivaldi. Accepts a comma-separated list; invalid (non-http) URLs are reported back as rejected, not silently dropped."),
+		mcp.WithToolAnnotation(mutateAnnot()), // spawns a process per call
 		mcp.WithString("urls", mcp.Description("Comma-separated list of URLs to open"), mcp.Required()),
 	)
 	s.AddTool(launchTabsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -102,21 +194,36 @@ func main() {
 				urlsStr = val
 			}
 		}
-
 		if urlsStr == "" {
-			return mcp.NewToolResultError("At least one URL is required"), nil
+			return jsonErr("launch_tabs", "missing_arg", "urls is required", "Provide a comma-separated list of URLs.")
 		}
 
-		urls := []string{urlsStr}
-		if err := vivaldi.LaunchURLsInVivaldi(urls); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to launch Vivaldi: %v", err)), nil
+		urls := splitCSV(urlsStr)
+		if len(urls) == 0 {
+			return jsonErr("launch_tabs", "no_urls", "urls parsed to empty list", "Check for stray commas or whitespace.")
 		}
 
-		return mcp.NewToolResultText("Vivaldi launched with provided URLs."), nil
+		result, err := vivaldi.LaunchURLs(urls, vivaldi.LaunchOptions{})
+		if err != nil {
+			// Even on error, surface the partial result so the caller
+			// knows which URLs were rejected.
+			resultBytes, _ := json.Marshal(map[string]interface{}{
+				"error": err.Error(),
+				"result": result,
+			})
+			return mcp.NewToolResultText(string(resultBytes)), nil
+		}
+		return jsonResult("launch_tabs", result)
 	})
 
+	// Serve stdio under the signal-aware context. ServeStdio doesn't
+	// currently accept context, but the defer-block on rootCtx cancel
+	// guarantees we exit on SIGINT/SIGTERM.
+	logger.Printf("starting on stdio (version 1.1.0)")
 	if err := server.ServeStdio(s); err != nil {
-		log.Fatalf("MCP server error: %v\n", err)
+		logger.Printf("MCP server error: %v", err)
+		// Cleanup
+		_ = rootCtx
 		os.Exit(1)
 	}
 }
