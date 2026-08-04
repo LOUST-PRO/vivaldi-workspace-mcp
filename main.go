@@ -18,6 +18,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/louzt/vivaldi-workspace-mcp/pkg/vivaldi"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -214,6 +215,102 @@ func main() {
 			return mcp.NewToolResultText(string(resultBytes)), nil
 		}
 		return jsonResult("launch_tabs", result)
+	})
+
+	// --- Tool: save_workspace_snapshot ---
+	saveSnapTool := mcp.NewTool(
+		"save_workspace_snapshot",
+		mcp.WithDescription("Captures the current Vivaldi workspace configuration and tab URLs to disk as an atomic JSON snapshot. Use the snapshot_id from the response as input to restore_workspace_snapshot."),
+		mcp.WithToolAnnotation(mutateAnnot()),
+		mcp.WithString("label", mcp.Description("Optional human label for the snapshot; falls back to UTC timestamp. Filename-safe characters only ([A-Za-z0-9._-]).")),
+		mcp.WithString("workspace_id", mcp.Description("Optional workspace ID to snapshot only that workspace. Omit to snapshot all workspaces.")),
+	)
+	s.AddTool(saveSnapTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		label, wsid := "", ""
+		if argsMap, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if v, ok := argsMap["label"].(string); ok {
+				label = v
+			}
+			if v, ok := argsMap["workspace_id"].(string); ok {
+				wsid = v
+			}
+		}
+		res, err := vivaldi.SaveSnapshot(vivaldi.SaveSnapshotOption{
+			Label:    label,
+			OnlyWSID: wsid,
+		})
+		if err != nil {
+			return jsonErr("save_workspace_snapshot", "save_failed", err.Error(),
+				"Check filesystem permissions on the snapshot base directory.")
+		}
+		return jsonResult("save_workspace_snapshot", res)
+	})
+
+	// --- Tool: restore_workspace_snapshot ---
+	restoreSnapTool := mcp.NewTool(
+		"restore_workspace_snapshot",
+		mcp.WithDescription("Re-launches URLs from a previously saved snapshot via hardened launch_tabs. Splits into batches of 30 to avoid overwhelming Vivaldi. Invalid URLs are reported back via the rejected_urls field."),
+		mcp.WithToolAnnotation(mutateAnnot()),
+		mcp.WithString("snapshot_id", mcp.Description("The snapshot_id returned by save_workspace_snapshot or shown in list_snapshots."), mcp.Required()),
+		mcp.WithString("workspace_id", mcp.Description("Optional workspace ID to restore only that workspace.")),
+		mcp.WithNumber("launch_timeout_seconds", mcp.Description("Per-batch timeout in seconds. Defaults to 10.")),
+	)
+	s.AddTool(restoreSnapTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		snapID, wsid := "", ""
+		var timeoutSec float64 = 0
+		if argsMap, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if v, ok := argsMap["snapshot_id"].(string); ok {
+				snapID = v
+			}
+			if v, ok := argsMap["workspace_id"].(string); ok {
+				wsid = v
+			}
+			if v, ok := argsMap["launch_timeout_seconds"].(float64); ok && v > 0 {
+				timeoutSec = v
+			}
+		}
+		if snapID == "" {
+			return jsonErr("restore_workspace_snapshot", "missing_arg",
+				"snapshot_id is required", "Run list_snapshots to find an available snapshot.")
+		}
+
+		opts := vivaldi.LaunchOptions{}
+		if timeoutSec > 0 {
+			opts.Timeout = time.Duration(timeoutSec * float64(time.Second))
+		}
+
+		res, err := vivaldi.RestoreSnapshot(snapID, opts, wsid)
+		if err != nil {
+			// Surface partial result even on error
+			resultBytes, _ := json.Marshal(map[string]interface{}{
+				"error":  err.Error(),
+				"result": res,
+			})
+			return mcp.NewToolResultText(string(resultBytes)), nil
+		}
+		return jsonResult("restore_workspace_snapshot", res)
+	})
+
+	// --- Tool: list_snapshots ---
+	listSnapshotsTool := mcp.NewTool(
+		"list_snapshots",
+		mcp.WithDescription("Lists saved snapshots sorted newest-first. Returns metadata only (no tab data) for cheap enumeration."),
+		mcp.WithToolAnnotation(readOnlyAnnot()),
+		mcp.WithNumber("limit", mcp.Description("Max number of snapshots to return. 0 = all.")),
+	)
+	s.AddTool(listSnapshotsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var limit float64 = 0
+		if argsMap, ok := request.Params.Arguments.(map[string]interface{}); ok {
+			if v, ok := argsMap["limit"].(float64); ok {
+				limit = v
+			}
+		}
+		res, err := vivaldi.ListSnapshots(int(limit))
+		if err != nil {
+			return jsonErr("list_snapshots", "list_failed", err.Error(),
+				"Check snapshot base directory permissions.")
+		}
+		return jsonResult("list_snapshots", res)
 	})
 
 	// Serve stdio under the signal-aware context. ServeStdio doesn't
