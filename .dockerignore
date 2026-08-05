@@ -22,6 +22,7 @@ coverage.*
 # Repo-internal docs that don't affect the runtime
 docs/
 plan.md
+README.md
 README.es.md
 
 # CI
