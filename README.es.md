@@ -121,6 +121,48 @@ En `~/.claude/settings.json` (o el equivalente de tu cliente):
 
 El servidor requiere que Vivaldi esté instalado en la ubicación estándar (binario `vivaldi` en `$PATH`) y un perfil en `~/.config/vivaldi/Default/`.
 
+### Ejecutar con Docker
+
+La imagen está publicada para entornos donde necesitas correr el servidor
+sin instalar Go localmente. El contenedor sigue necesitando acceso al
+perfil de Vivaldi del host (`/home/<usuario>/.config/vivaldi/Default`)
+y al binario de Vivaldi en `$PATH` para que funcionen `launch_tabs` y
+`restore_workspace_snapshot` — esas herramientas invocan a Vivaldi en
+el host.
+
+```bash
+docker build -t vivaldi-workspace-mcp .
+
+# Perfil de solo lectura + rutas host con permisos de escritura para
+# export y snapshots. Reemplaza <UID> con tu id numérico (`id -u`).
+docker run --rm -i \
+  -v "$HOME/.config/vivaldi/Default:/home/app/.config/vivaldi/Default:ro" \
+  -v "$HOME/.local/share/vivaldi-workspace-mcp/snapshots:/home/app/.local/share/vivaldi-workspace-mcp/snapshots" \
+  -v "$HOME/Pestanas_Recuperadas_Vivaldi.html:/home/app/Pestanas_Recuperadas_Vivaldi.html" \
+  --user "$(id -u):$(id -g)" \
+  vivaldi-workspace-mcp
+```
+
+El `Dockerfile` es multi-stage (Go 1.26 → binario estático → Alpine 3.24),
+corre como UID 65532 y no añade capacidades de red. Tamaño: ~15 MB.
+También lo usa el registro de Glama.ai para correr introspección contra
+el servidor; consulta el encabezado del `Dockerfile` para ver todas las
+garantías.
+
+Si tu directorio de perfil de Vivaldi pertenece a otro usuario que el
+que corre Docker, dale al UID del contenedor (`65532` por defecto)
+permiso de lectura y traversal sobre él. Ejemplo para perfil
+gestionado por el sistema:
+
+```bash
+sudo setfacl -R -m u:65532:rx "$HOME/.config/vivaldi/Default"
+sudo setfacl -R -d -m u:65532:rx "$HOME/.config/vivaldi/Default"
+```
+
+O pasa `--user "$(id -u):$(id -g)"` (como en el ejemplo de arriba)
+para que el contenedor corra como el usuario del host y comparta los
+mismos permisos de archivo.
+
 ### 3. Probarlo
 
 Desde tu cliente MCP:

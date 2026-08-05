@@ -121,6 +121,45 @@ In `~/.claude/settings.json` (or your client's equivalent):
 
 The server requires Vivaldi to be installed at the standard location (`vivaldi` binary in `$PATH`) and a profile at `~/.config/vivaldi/Default/`.
 
+### Run in Docker
+
+The image is published for environments that need to run the server
+without installing Go or building locally. The container still needs
+access to the host Vivaldi profile (`/home/<you>/.config/vivaldi/Default`)
+and a Vivaldi binary on `$PATH` for `launch_tabs` / `restore_workspace_snapshot`
+to work — those tools invoke Vivaldi on the host.
+
+```bash
+docker build -t vivaldi-workspace-mcp .
+
+# Read-only profile + writable host paths for export and snapshots.
+# Replace <UID> with your numeric user id (run `id -u`).
+docker run --rm -i \
+  -v "$HOME/.config/vivaldi/Default:/home/app/.config/vivaldi/Default:ro" \
+  -v "$HOME/.local/share/vivaldi-workspace-mcp/snapshots:/home/app/.local/share/vivaldi-workspace-mcp/snapshots" \
+  -v "$HOME/Pestanas_Recuperadas_Vivaldi.html:/home/app/Pestanas_Recuperadas_Vivaldi.html" \
+  --user "$(id -u):$(id -g)" \
+  vivaldi-workspace-mcp
+```
+
+The `Dockerfile` is multi-stage (Go 1.26 → static binary → Alpine 3.24),
+runs as UID 65532, and adds no network capability. Image size: ~15 MB.
+It is also used by Glama.ai's registry to run introspection against the
+server; see `Dockerfile` header for the full set of guarantees.
+
+If your Vivaldi profile directory is owned by a different user than the
+one running Docker, grant the container's UID (`65532` by default) read
+and directory-search permission on it. Example for a system-managed
+profile:
+
+```bash
+sudo setfacl -R -m u:65532:rx "$HOME/.config/vivaldi/Default"
+sudo setfacl -R -d -m u:65532:rx "$HOME/.config/vivaldi/Default"
+```
+
+Or pass `--user "$(id -u):$(id -g)"` (as shown above) so the container
+runs as the host user and shares the same file access.
+
 ### 3. Try it
 
 From your MCP client:
