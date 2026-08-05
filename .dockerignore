@@ -1,0 +1,28 @@
+# Keep the build context small. Anything not matched is sent to the
+# daemon and bloats `docker build` cache layers.
+
+# Local artifacts
+bin/
+*.test
+*.out
+coverage.*
+
+# Editor / OS noise
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~
+
+# Git history (never bake into images)
+.git/
+.gitignore
+.gitattributes
+
+# Repo-internal docs that don't affect the runtime
+docs/
+plan.md
+README.es.md
+
+# CI
+.github/

@@ -121,6 +121,26 @@ In `~/.claude/settings.json` (or your client's equivalent):
 
 The server requires Vivaldi to be installed at the standard location (`vivaldi` binary in `$PATH`) and a profile at `~/.config/vivaldi/Default/`.
 
+### Run in Docker
+
+The image is published for environments that need to run the server
+without installing Go or building locally. The container still needs
+access to the host Vivaldi profile (`/home/<you>/.config/vivaldi/Default`)
+and a Vivaldi binary on `$PATH` for `launch_tabs` / `restore_workspace_snapshot`
+to work — those tools invoke Vivaldi on the host.
+
+```bash
+docker build -t vivaldi-workspace-mcp .
+docker run --rm -i \
+  -v "$HOME/.config/vivaldi/Default:/home/app/.config/vivaldi/Default:ro" \
+  vivaldi-workspace-mcp
+```
+
+The `Dockerfile` is multi-stage (Go 1.26 → static binary → Alpine 3.24),
+runs as UID 65532, and adds no network capability. Image size: ~15 MB.
+It is also used by Glama.ai's registry to run introspection against the
+server; see `Dockerfile` header for the full set of guarantees.
+
 ### 3. Try it
 
 From your MCP client:
