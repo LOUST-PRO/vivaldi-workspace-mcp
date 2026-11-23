@@ -105,6 +105,21 @@ cd vivaldi-workspace-mcp
 go build -o bin/vivaldi-workspace-mcp .
 ```
 
+**No Go toolchain?** Build the binary in a container with Podman or Docker
+and run it on the host:
+
+```bash
+scripts/build-binary.sh
+# equivalent to either of:
+#   podman build --target binary --output type=local,dest=bin .
+#   docker build --target binary --output type=local,dest=bin .
+```
+
+The script prefers `podman` and falls back to `docker` (set
+`CONTAINER_ENGINE` to force one). Docker needs BuildKit for `--output`,
+which is the default since Docker 23. The result is a static binary at
+`bin/vivaldi-workspace-mcp`.
+
 ### 2. Configure in your MCP client
 
 In `~/.claude/settings.json` (or your client's equivalent):
