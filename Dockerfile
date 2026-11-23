@@ -37,7 +37,7 @@
 #     analysis of the container should report "no outbound traffic".
 
 # ---- Stage 1: build --------------------------------------------------------
-FROM golang:1.26.5-alpine3.24 AS builder
+FROM docker.io/library/golang:1.26.5-alpine3.24 AS builder
 
 WORKDIR /src
 
@@ -60,8 +60,20 @@ RUN CGO_ENABLED=0 GOOS=linux \
         -o /out/vivaldi-workspace-mcp \
         .
 
+# ---- Stage 1b: binary export (opt-in) --------------------------------------
+# Lets you build the host binary without a local Go toolchain:
+#
+#   podman build --target binary --output type=local,dest=bin .
+#   docker buildx build --target binary --output type=local,dest=bin .
+#
+# Produces ./bin/vivaldi-workspace-mcp (static, linux/amd64 by default).
+# This stage is skipped by a plain `build` because the runtime stage
+# below is the last stage and therefore the default target.
+FROM scratch AS binary
+COPY --from=builder /out/vivaldi-workspace-mcp /vivaldi-workspace-mcp
+
 # ---- Stage 2: runtime ------------------------------------------------------
-FROM alpine:3.24
+FROM docker.io/library/alpine:3.24
 
 # UID 65532 matches the "nonroot" convention used by distroless and
 # most hardened container base images. -D creates without password
